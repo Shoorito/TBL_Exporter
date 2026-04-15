@@ -21,6 +21,7 @@ TBL_Exporter는 Excel로 작업된 기획 데이터를 프로그램 코드에서
 + **ExportOptions**: Export 시 데이터에 압축, 암호화 같은 별도 설정이 가능합니다
   + **UseEncrypt**: Export한 데이터를 암호화합니다
   + **ToBinary**: Export한 데이터를 LZ4 기반 압축 알고리즘을 사용해 압축합니다
+  + **OnlySelectExportType**: `ToBinary` 또는 `UseEncrypt` 옵션 사용 시, 중간 산출물(원본 XML/JSON 파일)을 자동 삭제하고 최종 변환 파일만 남깁니다
 + **LoadedFileList**: 로드된 Excel 파일들을 보여줍니다, 각 파일을 더블 클릭하여 1개씩 변환 할 수 있습니다
 + **EncryptOption**: 암호화 관련 설정이 가능합니다, "UseEncrypt" 옵션이 체크되어 있어야 표시됩니다
   + **Password**: 데이터를 암호화 할 때 사용할 Key를 지정합니다, 4자리 이상부터 지정 가능합니다
