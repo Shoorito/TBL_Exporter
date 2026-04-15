@@ -4,9 +4,10 @@ using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.IO;
-using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace MWTools
@@ -41,8 +42,10 @@ namespace MWTools
 
         bool mUseEncrypt = false;
         bool mNowProgress = false;
+        bool mExportRunning = false;
         bool mExportToBinary = false;
         bool mIgnoreWildcardColumn = false;
+        bool mOnlySelectExportType = false;
         string mTableLoadPath = "";
         string mTableExportPath = "";
         string mEncryptPassword = "";
@@ -51,6 +54,12 @@ namespace MWTools
         List<FilePathData> mFilePathDataList = new List<FilePathData>();
 
         bool mDirtySave = false;
+
+        static readonly JsonSerializerOptions s_jsonOptions = new JsonSerializerOptions()
+        {
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        };
 
         const string MESSAGE_BOX_TITLE_ERROR = "오류";
         const string MESSAGE_BOX_TITLE_NOTICE = "알림";
@@ -64,6 +73,7 @@ namespace MWTools
         const string CONFIG_FIELD_EXPORT_USE_ENCRYPT = "UseExportEncrypt";
         const string CONFIG_FIELD_EXPORT_TO_BINARY = "ExportToBinary";
         const string CONFIG_FIELD_ENCRYPT_PASSWORD = "EncryptPassword";
+        const string CONFIG_FIELD_ONLY_SELECT_EXPORT_TYPE = "OnlySelectExportType";
 
         const string FILE_EXTENSION_BINARY = ".bytes";
         const string FILE_EXTENSION_ENCRYPT = ".ens";
@@ -96,6 +106,7 @@ namespace MWTools
             tgl_ignore_wildcard.MouseClick += OnClickedIgnoreWildcardColumns;
             tgl_use_encrypt.MouseClick += OnClickedUseEncrypt;
             tgl_convert_bin.MouseClick += OnClickedUseToBinary;
+            tgl_only_select_export_type.MouseClick += OnClickedOnlySelectTypeExport;
 
             btn_find_table_load_path.MouseClick += OnClickedSearchPathForLoadPath;
             btn_find_export_path.MouseClick += OnClickedSearchPathForExportPath;
@@ -118,6 +129,7 @@ namespace MWTools
             tgl_ignore_wildcard.MouseClick -= OnClickedIgnoreWildcardColumns;
             tgl_use_encrypt.MouseClick -= OnClickedUseEncrypt;
             tgl_convert_bin.MouseClick -= OnClickedUseToBinary;
+            tgl_only_select_export_type.MouseClick -= OnClickedOnlySelectTypeExport;
 
             btn_find_table_load_path.MouseClick -= OnClickedSearchPathForLoadPath;
             btn_find_export_path.MouseClick -= OnClickedSearchPathForExportPath;
@@ -155,48 +167,45 @@ namespace MWTools
             ExportTablePathTextBox.Text = GetFirstChildValue(CONFIG_FIELD_EXPORT_DIR_PATH);
 
             var ignoreSheetNames = GetFirstChildValue(CONFIG_FIELD_IGNORE_SHEET_NAMES);
-            if (ignoreSheetNames != null && ignoreSheetNames.Length > 0)
+            if (!string.IsNullOrWhiteSpace(ignoreSheetNames))
             {
-                var splitNames = ignoreSheetNames.Split(',');
-                if (splitNames != null && splitNames.Length > 0)
+                mExportIgnoreSheetNameList.Clear();
+                foreach (var splitName in ignoreSheetNames.Split(','))
                 {
-                    mExportIgnoreSheetNameList.Clear();
-                    foreach (var splitName in splitNames)
-                    {
-                        if (string.IsNullOrEmpty(splitName) || string.IsNullOrWhiteSpace(splitName))
-                            continue;
-
+                    if (!string.IsNullOrWhiteSpace(splitName))
                         mExportIgnoreSheetNameList.Add(splitName);
-                    }
                 }
-
                 IgnoreSheetNamesTextBox.Text = ignoreSheetNames;
             }
 
             // Load: SelectConvertMode
             var selectConvertModeValStr = GetFirstChildValue(CONFIG_FIELD_SELECT_CONVERT_MODE);
-            if (selectConvertModeValStr != null && selectConvertModeValStr.Length > 0)
+            if (!string.IsNullOrWhiteSpace(selectConvertModeValStr))
                 mExportType = (eExportFileType)Convert.ToInt32(selectConvertModeValStr);
 
             // Load: ExportOptions
             var useEncryptValStr = GetFirstChildValue(CONFIG_FIELD_EXPORT_USE_ENCRYPT);
-            if (useEncryptValStr != null && useEncryptValStr.Length > 0)
+            if (!string.IsNullOrWhiteSpace(useEncryptValStr))
                 mUseEncrypt = Convert.ToBoolean(useEncryptValStr);
 
             var useToExportValStr = GetFirstChildValue(CONFIG_FIELD_EXPORT_TO_BINARY);
-            if (useToExportValStr != null && useToExportValStr.Length > 0)
+            if (!string.IsNullOrWhiteSpace(useToExportValStr))
                 mExportToBinary = Convert.ToBoolean(useToExportValStr);
 
             var ignoreWildcardCol = GetFirstChildValue(CONFIG_FIELD_IGNORE_WILD_CARD_COLUMNS);
-            if (ignoreWildcardCol != null && ignoreWildcardCol.Length > 0)
+            if (!string.IsNullOrWhiteSpace(ignoreWildcardCol))
                 mIgnoreWildcardColumn = Convert.ToBoolean(ignoreWildcardCol);
 
             var encryptPassword = GetFirstChildValue(CONFIG_FIELD_ENCRYPT_PASSWORD);
-            if (encryptPassword != null && encryptPassword.Length > 0)
+            if (!string.IsNullOrWhiteSpace(encryptPassword))
             {
                 mEncryptPassword = encryptPassword;
                 textboxEncryptPassword.Text = encryptPassword;
             }
+
+            var onlySelectExportType = GetFirstChildValue(CONFIG_FIELD_ONLY_SELECT_EXPORT_TYPE);
+            if (!string.IsNullOrWhiteSpace(onlySelectExportType))
+                mOnlySelectExportType = Convert.ToBoolean(onlySelectExportType);
         }
 
         //----------------------------------------------------------------------------
@@ -220,11 +229,7 @@ namespace MWTools
                 return;
 
             mTableLoadPath = TableLoadPathTextBox.Text;
-            if (string.IsNullOrEmpty(mTableLoadPath) || string.IsNullOrWhiteSpace(mTableLoadPath))
-            {
-                // 공백은 아무것도 입력하지 않은 상태이기 때문에 그냥 무시함
-            }
-            else
+            if (!string.IsNullOrWhiteSpace(mTableLoadPath))
             {
                 bool invalidPath = false;
                 if (PathUtil.IsValidPath(mTableLoadPath) == false)
@@ -239,11 +244,14 @@ namespace MWTools
                     MessageBox.Show("입력된 경로에 폴더가 없습니다.", MESSAGE_BOX_TITLE_ERROR);
                 }
 
-                var arr_table_file_path = Directory.GetFiles(mTableLoadPath);
-                if (invalidPath == false && arr_table_file_path.Length <= 0)
+                if (invalidPath == false)
                 {
-                    invalidPath = true;
-                    MessageBox.Show("입력된 경로의 파일이 없습니다.", MESSAGE_BOX_TITLE_ERROR);
+                    var arr_table_file_path = Directory.GetFiles(mTableLoadPath);
+                    if (arr_table_file_path.Length <= 0)
+                    {
+                        invalidPath = true;
+                        MessageBox.Show("입력된 경로의 파일이 없습니다.", MESSAGE_BOX_TITLE_ERROR);
+                    }
                 }
 
                 // 잘못된 경로가 기입되면 입력 상자를 초기화한다
@@ -267,22 +275,13 @@ namespace MWTools
                 return;
 
             mTableExportPath = ExportTablePathTextBox.Text;
-            if (string.IsNullOrEmpty(mTableLoadPath) || string.IsNullOrWhiteSpace(mTableLoadPath))
+            if (!string.IsNullOrWhiteSpace(mTableExportPath))
             {
-                // 공백은 아무것도 입력하지 않은 상태이기 때문에 그냥 무시함
-            }
-            else
-            {
-                bool invalidPath = false;
-                if (PathUtil.IsValidPath(mTableLoadPath) == false)
+                if (PathUtil.IsValidPath(mTableExportPath) == false)
                 {
-                    invalidPath = true;
+                    mTableExportPath = "";
                     MessageBox.Show("입력된 경로가 올바르지 않습니다.", MESSAGE_BOX_TITLE_ERROR);
                 }
-
-                // 잘못된 경로가 기입되면 입력 상자를 초기화한다
-                if (invalidPath)
-                    mTableLoadPath = "";
             }
 
             ExportTablePathTextBox.Text = mTableExportPath;
@@ -294,25 +293,19 @@ namespace MWTools
         }
 
         //----------------------------------------------------------------------------
-        private void RefreshIgnoreSheets(bool immediatlySave = true, bool forcedClear = false)
+        private void RefreshIgnoreSheets(bool immediatlySave = true)
         {
-            if (forcedClear)
-                mExportIgnoreSheetNameList.Clear();
-
             var ignoreSheetNames = IgnoreSheetNamesTextBox.Text.Split(',');
             bool isDirty = false;
-            if (ignoreSheetNames != null && ignoreSheetNames.Length > 0)
+            foreach (var ignoreSheetName in ignoreSheetNames)
             {
-                foreach (var ignoreSheetName in ignoreSheetNames)
-                {
-                    if (string.IsNullOrEmpty(ignoreSheetName) || string.IsNullOrWhiteSpace(ignoreSheetName))
-                        continue;
+                if (string.IsNullOrWhiteSpace(ignoreSheetName))
+                    continue;
 
-                    if (mExportIgnoreSheetNameList.Contains(ignoreSheetName) == false)
-                    {
-                        isDirty = true;
-                        mExportIgnoreSheetNameList.Add(ignoreSheetName);
-                    }
+                if (mExportIgnoreSheetNameList.Contains(ignoreSheetName) == false)
+                {
+                    isDirty = true;
+                    mExportIgnoreSheetNameList.Add(ignoreSheetName);
                 }
             }
 
@@ -333,11 +326,7 @@ namespace MWTools
                 return;
 
             mEncryptPassword = textboxEncryptPassword.Text;
-            if (string.IsNullOrEmpty(mEncryptPassword) || string.IsNullOrWhiteSpace(mEncryptPassword))
-            {
-                // 공백은 아무것도 입력하지 않은 상태이기 때문에 그냥 무시함
-            }
-            else if (mEncryptPassword.Length < MIN_LEN_ENCRYPT_PASSWORD)
+            if (!string.IsNullOrWhiteSpace(mEncryptPassword) && mEncryptPassword.Length < MIN_LEN_ENCRYPT_PASSWORD)
             {
                 mEncryptPassword = "";
                 MessageBox.Show("암호화에 사용될 패스워드는 4글자 이상이어야 합니다", MESSAGE_BOX_TITLE_ERROR, MessageBoxButtons.OK);
@@ -355,82 +344,89 @@ namespace MWTools
         private void RefreshForm()
         {
             LoadedTableListView.Items.Clear();
+            mFilePathDataList.Clear();
 
             string loadDirPath = TableLoadPathTextBox.Text;
-            if (string.IsNullOrEmpty(loadDirPath) || string.IsNullOrWhiteSpace(loadDirPath))
-            {
-            }
-            else
+            if (!string.IsNullOrWhiteSpace(loadDirPath))
             {
                 if (Directory.Exists(loadDirPath) == false)
                 {
                     MessageBox.Show("입력된 경로에 폴더가 없습니다.", MESSAGE_BOX_TITLE_ERROR);
-                    return;
                 }
-
-                var arrTableFilePath = Directory.GetFiles(loadDirPath);
-                if (arrTableFilePath.Length <= 0)
+                else
                 {
-                    MessageBox.Show("입력된 경로에 파일이 없습니다.", MESSAGE_BOX_TITLE_ERROR);
-                    return;
-                }
-
-                foreach (string tableFilePath in arrTableFilePath)
-                {
-                    // 추후 ".xlsx" 파일이 아니어도 읽어올 수 있도록 개선하는 편이 좋아보임
-                    if (Path.GetExtension(tableFilePath).ToLower() != ".xlsx")
-                        continue;
-
-                    if (Path.GetFileName(tableFilePath).StartsWith("~$"))
-                        continue;
-
-                    if (PathUtil.IsValidPath(tableFilePath) == false)
-                        continue;
-
-                    var filePathData = new FilePathData();
-                    filePathData.idx = mFilePathDataList == null ? 0 : mFilePathDataList.Count;
-                    filePathData.file_path = tableFilePath;
-                    filePathData.file_status = eFileStatus.Usable;
-
-                    FileStream tblFileStream = null;
-                    try
+                    // "*.xlsx" 패턴으로 확장자 필터링을 OS 수준에서 처리 (post-filter 불필요)
+                    var arrTableFilePath = Directory.GetFiles(loadDirPath, "*.xlsx");
+                    if (arrTableFilePath.Length <= 0)
                     {
-                        var tbl_file_info = new FileInfo(tableFilePath);
-                        tblFileStream = tbl_file_info.Open(FileMode.Open);
+                        MessageBox.Show("입력된 경로에 파일이 없습니다.", MESSAGE_BOX_TITLE_ERROR);
                     }
-                    catch (FileNotFoundException)
+                    else
                     {
-                        filePathData.file_status = eFileStatus.NotFoundFile;
-                    }
-                    catch (UnauthorizedAccessException)
-                    {
-                        filePathData.file_status = eFileStatus.UnAuthorizedAccess;
-                    }
-                    catch (DirectoryNotFoundException)
-                    {
-                        filePathData.file_status = eFileStatus.NotFoundDirectory;
-                    }
-                    catch (IOException)
-                    {
-                        filePathData.file_status = eFileStatus.Busy;
-                    }
+                        LoadedTableListView.BeginUpdate();
+                        try
+                        {
+                            foreach (string tableFilePath in arrTableFilePath)
+                            {
+                                // Excel이 열어둔 임시 파일(~$로 시작) 제외
+                                if (Path.GetFileName(tableFilePath).StartsWith("~$"))
+                                    continue;
 
-                    tblFileStream?.Close();
+                                if (PathUtil.IsValidPath(tableFilePath) == false)
+                                    continue;
 
-                    mFilePathDataList.Add(filePathData);
+                                var filePathData = new FilePathData();
+                                filePathData.idx = mFilePathDataList.Count;
+                                filePathData.file_path = tableFilePath;
+                                filePathData.file_status = eFileStatus.Usable;
 
-                    var tblPathListViewItem = new ListViewItem(Path.GetFileName(filePathData.file_path));
-                    var tblPathListViewSubItem = new ListViewItem.ListViewSubItem();
-                    tblPathListViewSubItem.Text = filePathData.file_status.ToString();
+                                FileStream tblFileStream = null;
+                                try
+                                {
+                                    tblFileStream = new FileInfo(tableFilePath).Open(FileMode.Open);
+                                }
+                                catch (FileNotFoundException)
+                                {
+                                    filePathData.file_status = eFileStatus.NotFoundFile;
+                                }
+                                catch (UnauthorizedAccessException)
+                                {
+                                    filePathData.file_status = eFileStatus.UnAuthorizedAccess;
+                                }
+                                catch (DirectoryNotFoundException)
+                                {
+                                    filePathData.file_status = eFileStatus.NotFoundDirectory;
+                                }
+                                catch (IOException)
+                                {
+                                    filePathData.file_status = eFileStatus.Busy;
+                                }
+                                finally
+                                {
+                                    tblFileStream?.Close();
+                                }
 
-                    if (filePathData.file_status != eFileStatus.Usable)
-                    {
-                        tblPathListViewSubItem.BackColor = Color.Red;
-                        tblPathListViewSubItem.ForeColor = Color.White;
+                                mFilePathDataList.Add(filePathData);
+
+                                var tblPathListViewItem = new ListViewItem(Path.GetFileName(filePathData.file_path));
+                                var tblPathListViewSubItem = new ListViewItem.ListViewSubItem();
+                                tblPathListViewSubItem.Text = filePathData.file_status.ToString();
+
+                                if (filePathData.file_status != eFileStatus.Usable)
+                                {
+                                    tblPathListViewSubItem.BackColor = Color.Red;
+                                    tblPathListViewSubItem.ForeColor = Color.White;
+                                }
+
+                                tblPathListViewItem.SubItems.Add(tblPathListViewSubItem);
+                                LoadedTableListView.Items.Add(tblPathListViewItem);
+                            }
+                        }
+                        finally
+                        {
+                            LoadedTableListView.EndUpdate();
+                        }
                     }
-
-                    tblPathListViewItem.SubItems.Add(tblPathListViewSubItem);
-                    LoadedTableListView.Items.Add(tblPathListViewItem);
                 }
             }
 
@@ -442,6 +438,7 @@ namespace MWTools
             tgl_use_encrypt.Checked = mUseEncrypt;
             tgl_convert_bin.Checked = mExportToBinary;
             tgl_ignore_wildcard.Checked = mIgnoreWildcardColumn;
+            tgl_only_select_export_type.Checked = mOnlySelectExportType;
 
             // 암호화 관련 UI 표시 여부 설정
             if (mUseEncrypt == false)
@@ -469,7 +466,7 @@ namespace MWTools
         //----------------------------------------------------------------------------
         private string GetConfigSavePath()
         {
-            return Path.Combine(Directory.GetCurrentDirectory(), "_config\\tbl_exporter_config.xml");
+            return Path.Combine(Directory.GetCurrentDirectory(), "_config", "tbl_exporter_config.xml");
         }
 
         //----------------------------------------------------------------------------
@@ -485,22 +482,7 @@ namespace MWTools
                 SetNodeValue(CONFIG_FIELD_EXPORT_DIR_PATH, mTableExportPath);
 
             if (mExportIgnoreSheetNameList.Count > 0)
-            {
-                var sb = new StringBuilder();
-                foreach (var sheetName in mExportIgnoreSheetNameList)
-                {
-                    if (sheetName == null || sheetName.Length <= 0)
-                        continue;
-
-                    sb.Append(sheetName);
-                    sb.Append(",");
-                }
-
-                if (sb.Length > 1)
-                    sb.Remove(sb.Length - 1, 1);
-
-                SetNodeValue(CONFIG_FIELD_IGNORE_SHEET_NAMES, sb.ToString());
-            }
+                SetNodeValue(CONFIG_FIELD_IGNORE_SHEET_NAMES, string.Join(",", mExportIgnoreSheetNameList));
 
             int exportValue = (int)mExportType;
             SetNodeValue(CONFIG_FIELD_SELECT_CONVERT_MODE, exportValue.ToString());
@@ -508,6 +490,7 @@ namespace MWTools
             SetNodeValue(CONFIG_FIELD_EXPORT_TO_BINARY, mExportToBinary.ToString());
             SetNodeValue(CONFIG_FIELD_ENCRYPT_PASSWORD, mEncryptPassword);
             SetNodeValue(CONFIG_FIELD_IGNORE_WILD_CARD_COLUMNS, mIgnoreWildcardColumn.ToString());
+            SetNodeValue(CONFIG_FIELD_ONLY_SELECT_EXPORT_TYPE, mOnlySelectExportType.ToString());
 
             XmlUtil.SaveXmlDocToFile(GetConfigSavePath(), mExportConfig);
             mDirtySave = false;
@@ -525,30 +508,28 @@ namespace MWTools
         }
 
         //----------------------------------------------------------------------------
-        private void OnTableExportWithXml(FilePathData pathData)
+        private void OnTableExportWithXml(FilePathData pathData, string exportPath)
         {
             if (pathData == null || PathUtil.IsValidPath(pathData.file_path) == false || pathData.file_status != eFileStatus.Usable)
                 return;
 
-            string exportPath = ExportTablePathTextBox.Text;
             if (Directory.Exists(exportPath) == false)
                 Directory.CreateDirectory(exportPath);
-
-            var exportXmlDoc = new XmlDocument();
-            var exportXmlRootNode = exportXmlDoc.AppendChild(exportXmlDoc.CreateElement("DataList"));
-            var data_id = Path.GetFileNameWithoutExtension(pathData.file_path);
-            XmlUtil.AddAttribute(exportXmlRootNode, "data_id", data_id);
 
             var getXlsxDataSet = ExportUtil.LoadXlsxFile(pathData.file_path, false);
             foreach (DataTable xlsxDataTable in getXlsxDataSet.Tables)
             {
-                if (string.IsNullOrEmpty(xlsxDataTable.TableName) == true || mExportIgnoreSheetNameList.Contains(xlsxDataTable.TableName) == true)
+                if (string.IsNullOrEmpty(xlsxDataTable.TableName) || mExportIgnoreSheetNameList.Contains(xlsxDataTable.TableName))
                     continue;
 
                 if (xlsxDataTable.Rows == null || xlsxDataTable.Rows.Count < 2)
                     continue;
 
-                var fieldNameList = new List<string>();
+                var exportXmlDoc = new XmlDocument();
+                var exportXmlRootNode = exportXmlDoc.AppendChild(exportXmlDoc.CreateElement("DataList"));
+                XmlUtil.AddAttribute(exportXmlRootNode, "data_id", xlsxDataTable.TableName);
+
+                var fieldNameList = new List<string>(xlsxDataTable.Columns.Count);
                 var fieldNameRow = xlsxDataTable.Rows[0];
                 for (int fieldNameCol = 0; fieldNameCol < xlsxDataTable.Columns.Count; fieldNameCol++)
                 {
@@ -556,13 +537,7 @@ namespace MWTools
                     // 데이터 컬럼을 읽어올 때 유효하지 않은 컬럼 네임일 경우 공백 컬럼을 넣어주고 의도적으로 무시함
                     // 이는 데이터를 읽을 때 의도적으로 무시하기 위함, 안전하기도 하고...
                     string colName = fieldNameRow[fieldNameCol].ToString().Trim();
-                    if (string.IsNullOrEmpty(colName) || string.IsNullOrWhiteSpace(colName))
-                    {
-                        fieldNameList.Add(string.Empty);
-                        continue;
-                    }
-
-                    if (mIgnoreWildcardColumn && StringUtil.ContainsSpecialOrWildcard(colName))
+                    if (string.IsNullOrWhiteSpace(colName) || (mIgnoreWildcardColumn && StringUtil.ContainsSpecialOrWildcard(colName)))
                     {
                         fieldNameList.Add(string.Empty);
                         continue;
@@ -585,7 +560,7 @@ namespace MWTools
                             continue;
 
                         string fieldValueText = xlsxDataTable.Rows[row][col].ToString();
-                        if (string.IsNullOrEmpty(fieldValueText) || string.IsNullOrWhiteSpace(fieldValueText))
+                        if (string.IsNullOrWhiteSpace(fieldValueText))
                             emptyCount += 1;
                         else
                             XmlUtil.AddAttribute(rowNode, fieldNameList[col], fieldValueText);
@@ -597,7 +572,7 @@ namespace MWTools
                         exportXmlRootNode.AppendChild(rowNode);
                 }
 
-                string writePath = $"{exportPath}\\{xlsxDataTable.TableName}.xml";
+                string writePath = Path.Combine(exportPath, $"{xlsxDataTable.TableName}.xml");
                 XmlUtil.SaveXmlDocToFile(writePath, exportXmlDoc);
 
                 // "UseEncrypt" 옵션이 True이면 "OnExportFileToBinary" 함수 내부에서 암호화 함수 함께 호출
@@ -605,23 +580,26 @@ namespace MWTools
                     OnExportFileToBinary(writePath, exportPath);
                 else if (mUseEncrypt)
                     OnEncryptExportFile(writePath, exportPath);
+
+                // OnlySelectExportType 옵션이 켜져있을 때는 최종 산출물만 남기고 원본 파일을 삭제한다
+                if (mOnlySelectExportType && (mExportToBinary || mUseEncrypt) && File.Exists(writePath))
+                    File.Delete(writePath);
             }
         }
 
         //----------------------------------------------------------------------------
-        private void OnTableExportWithJson(FilePathData pathData)
+        private void OnTableExportWithJson(FilePathData pathData, string exportPath)
         {
             if (pathData == null || pathData.file_status != eFileStatus.Usable || PathUtil.IsValidPath(pathData.file_path) == false)
                 return;
 
-            string exportPath = ExportTablePathTextBox.Text;
             if (Directory.Exists(exportPath) == false)
                 Directory.CreateDirectory(exportPath);
 
             var getXlsxDataSet = ExportUtil.LoadXlsxFile(pathData.file_path, false);
             foreach (DataTable xlsxDataTable in getXlsxDataSet.Tables)
             {
-                if (string.IsNullOrEmpty(xlsxDataTable.TableName) == true || mExportIgnoreSheetNameList.Contains(xlsxDataTable.TableName) == true)
+                if (string.IsNullOrEmpty(xlsxDataTable.TableName) || mExportIgnoreSheetNameList.Contains(xlsxDataTable.TableName))
                     continue;
 
                 if (xlsxDataTable.Rows == null || xlsxDataTable.Rows.Count < 2)
@@ -631,17 +609,11 @@ namespace MWTools
                 // 데이터 컬럼을 읽어올 때 유효하지 않은 컬럼 네임일 경우 공백 컬럼을 넣어주고 의도적으로 무시함
                 // 이는 데이터를 읽을 때 의도적으로 무시하기 위함, 안전하기도 하고...
                 var fieldNameRow = xlsxDataTable.Rows[0];
-                var fieldNameList = new List<string>();
+                var fieldNameList = new List<string>(xlsxDataTable.Columns.Count);
                 for (int fieldNameCol = 0; fieldNameCol < xlsxDataTable.Columns.Count; fieldNameCol++)
                 {
                     string colName = fieldNameRow[fieldNameCol].ToString().Trim();
-                    if (string.IsNullOrEmpty(colName) || string.IsNullOrWhiteSpace(colName))
-                    {
-                        fieldNameList.Add(string.Empty);
-                        continue;
-                    }
-
-                    if (mIgnoreWildcardColumn && StringUtil.ContainsSpecialOrWildcard(colName))
+                    if (string.IsNullOrWhiteSpace(colName) || (mIgnoreWildcardColumn && StringUtil.ContainsSpecialOrWildcard(colName)))
                     {
                         fieldNameList.Add(string.Empty);
                         continue;
@@ -664,10 +636,8 @@ namespace MWTools
                             continue;
 
                         string fieldValueText = xlsxDataTable.Rows[row][col].ToString();
-                        if (string.IsNullOrEmpty(fieldValueText) || string.IsNullOrWhiteSpace(fieldValueText))
-                            continue;
-
-                        dicRowData.Add(fieldNameList[col], fieldValueText);
+                        if (!string.IsNullOrWhiteSpace(fieldValueText))
+                            dicRowData.Add(fieldNameList[col], fieldValueText);
                     }
 
                     // 데이터가 아예 없는 행은 변환 대상에서 제외
@@ -678,12 +648,7 @@ namespace MWTools
                 if (rowDataList.Count <= 0)
                     continue;
 
-                var jsonOptions = new JsonSerializerOptions()
-                {
-                    WriteIndented = true,
-                };
-
-                string jsonText = JsonSerializer.Serialize(rowDataList, jsonOptions);
+                string jsonText = JsonSerializer.Serialize(rowDataList, s_jsonOptions);
                 if (jsonText.Length <= 0)
                     continue;
 
@@ -695,6 +660,10 @@ namespace MWTools
                     OnExportFileToBinary(writePath, exportPath);
                 else if (mUseEncrypt)
                     OnEncryptExportFile(writePath, exportPath);
+
+                // OnlySelectExportType 옵션이 켜져있을 때는 최종 산출물만 남기고 원본 파일을 삭제한다
+                if (mOnlySelectExportType && (mExportToBinary || mUseEncrypt) && File.Exists(writePath))
+                    File.Delete(writePath);
             }
         }
 
@@ -704,12 +673,8 @@ namespace MWTools
         //----------------------------------------------------------------------------
         private void OnExportFileToBinary(string filePath, string exportBasePath)
         {
-            if (PathUtil.IsValidPath(filePath, true) == false || PathUtil.IsValidPath(exportBasePath, true) == false)
+            if (PathUtil.IsValidPath(filePath, true) == false || PathUtil.IsValidPath(exportBasePath) == false)
                 return;
-
-            string saveDirPath = Path.Combine(exportBasePath, "bins");
-            if (PathUtil.IsValidPath(saveDirPath, true) == false)
-                Directory.CreateDirectory(saveDirPath);
 
             var bytesSrc = File.ReadAllBytes(filePath);
             if (bytesSrc.Length <= 0)
@@ -720,12 +685,16 @@ namespace MWTools
                 return;
 
             string fileName = Path.GetFileNameWithoutExtension(filePath);
-            string savePath = Path.Combine(saveDirPath, $"{fileName}{FILE_EXTENSION_BINARY}");
+            string savePath = Path.Combine(exportBasePath, $"{fileName}{FILE_EXTENSION_BINARY}");
             File.WriteAllBytes(savePath, bytesCompressed);
 
             // 암호화 사용 옵션도 켜져있을 경우 압축된 파일에 암호화를 하도록 수정, 그에 따른 전용 파일 확장명 사용
             if (mUseEncrypt)
                 OnEncryptExportFile(savePath, exportBasePath, true);
+
+            // OnlySelectExportType 옵션이 켜져있고 암호화까지 진행됐다면 중간 산출물인 .bytes 파일을 삭제
+            if (mOnlySelectExportType && mUseEncrypt && File.Exists(savePath))
+                File.Delete(savePath);
         }
 
         /// <summary>
@@ -734,17 +703,20 @@ namespace MWTools
         //----------------------------------------------------------------------------
         private void OnEncryptExportFile(string filePath, string exportBasePath, bool fromToBinary = false)
         {
-            if (string.IsNullOrEmpty(textboxEncryptPassword.Text) || string.IsNullOrWhiteSpace(textboxEncryptPassword.Text))
+            if (string.IsNullOrWhiteSpace(mEncryptPassword))
                 return;
 
             string fileName = Path.GetFileNameWithoutExtension(filePath);
             string savePath = Path.Combine(exportBasePath, $"{fileName}{(fromToBinary ? FILE_EXTENSION_ENCRYPT_AND_BINARY : FILE_EXTENSION_ENCRYPT)}");
-            FileUtil.Encrypt(filePath, savePath, textboxEncryptPassword.Text);
+            FileUtil.Encrypt(filePath, savePath, mEncryptPassword);
         }
 
         //----------------------------------------------------------------------------
-        private void OnClickAllTableExport(object sender, EventArgs e)
+        private async void OnClickAllTableExport(object sender, EventArgs e)
         {
+            if (mExportRunning)
+                return;
+
             if (PathUtil.IsValidPath(ExportTablePathTextBox.Text) == false)
             {
                 MessageBox.Show("입력된 출력 경로가 올바르지 않습니다", MESSAGE_BOX_TITLE_ERROR);
@@ -772,22 +744,60 @@ namespace MWTools
             if (isExportAll == false)
                 return;
 
-            this.Enabled = false;
-
-            switch (mExportType)
-            {
-                case eExportFileType.XML:
-                    mFilePathDataList.ForEach(path => OnTableExportWithXml(path));
-                    break;
-
-                case eExportFileType.Json:
-                    mFilePathDataList.ForEach(path => OnTableExportWithJson(path));
-                    break;
-            }
-
-            this.Enabled = true;
-
+            await RunExportAsync(mFilePathDataList.ToArray());
             MessageBox.Show("모든 테이블의 변환 작업이 완료되었습니다", MESSAGE_BOX_TITLE_NOTICE, MessageBoxButtons.OK);
+        }
+
+        //----------------------------------------------------------------------------
+        private async Task RunExportAsync(FilePathData[] targets)
+        {
+            mExportRunning = true;
+            this.Enabled = false;
+            progressBarExport.Value = 0;
+            progressBarExport.Maximum = targets.Length;
+            progressBarExport.Visible = true;
+            labelExportStatus.Visible = true;
+
+            var exportType = mExportType;
+            try
+            {
+                for (int i = 0; i < targets.Length; i++)
+                {
+                    var pathData = targets[i];
+                    labelExportStatus.Text = $"변환 중... ({i + 1}/{targets.Length}) {Path.GetFileName(pathData.file_path)}";
+
+                    var exportPath = ExportTablePathTextBox.Text;
+                    try
+                    {
+                        await Task.Run(() =>
+                        {
+                            switch (exportType)
+                            {
+                                case eExportFileType.XML:
+                                    OnTableExportWithXml(pathData, exportPath);
+                                    break;
+                                case eExportFileType.Json:
+                                    OnTableExportWithJson(pathData, exportPath);
+                                    break;
+                            }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        SHLog.LogError($"[TBL_Exporter] 변환 실패: {pathData.file_path} - {ex.Message}");
+                        MessageBox.Show($"변환 중 오류 발생:\n{Path.GetFileName(pathData.file_path)}\n{ex.Message}", MESSAGE_BOX_TITLE_ERROR);
+                    }
+
+                    progressBarExport.Value = i + 1;
+                }
+            }
+            finally
+            {
+                progressBarExport.Visible = false;
+                labelExportStatus.Visible = false;
+                this.Enabled = true;
+                mExportRunning = false;
+            }
         }
 
         //----------------------------------------------------------------------------
@@ -874,8 +884,11 @@ namespace MWTools
         }
 
         //----------------------------------------------------------------------------
-        private void OnDoubleClickLoadedTableListView(object sender, MouseEventArgs e)
+        private async void OnDoubleClickLoadedTableListView(object sender, MouseEventArgs e)
         {
+            if (mExportRunning)
+                return;
+
             if (e.Button.Equals(MouseButtons.Left) && LoadedTableListView.SelectedItems.Count > 0)
             {
                 if (PathUtil.IsValidPath(mTableExportPath) == false)
@@ -902,21 +915,7 @@ namespace MWTools
                     if (runExport == false)
                         return;
 
-                    // 작업이 길어질 경우를 대비한 폼 내 상호작용을 모두 막음
-                    this.Enabled = false;
-
-                    switch (mExportType)
-                    {
-                        case eExportFileType.XML:
-                            OnTableExportWithXml(selectedPathData);
-                            break;
-
-                        case eExportFileType.Json:
-                            OnTableExportWithJson(selectedPathData);
-                            break;
-                    }
-
-                    this.Enabled = true;
+                    await RunExportAsync(new[] { selectedPathData });
                     MessageBox.Show("Table 데이터 변환이 완료되었습니다", MESSAGE_BOX_TITLE_NOTICE, MessageBoxButtons.OK);
                 }
             }
@@ -967,6 +966,17 @@ namespace MWTools
 
             tgl_ignore_wildcard.Checked = !tgl_ignore_wildcard.Checked;
             mIgnoreWildcardColumn = tgl_ignore_wildcard.Checked;
+            SaveFormConfig();
+        }
+
+        //----------------------------------------------------------------------------
+        private void OnClickedOnlySelectTypeExport(object sender, MouseEventArgs e)
+        {
+            if (e == null || e.Button.Equals(MouseButtons.Left) == false)
+                return;
+
+            tgl_only_select_export_type.Checked = !tgl_only_select_export_type.Checked;
+            mOnlySelectExportType = tgl_only_select_export_type.Checked;
             SaveFormConfig();
         }
 

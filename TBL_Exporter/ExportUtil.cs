@@ -1,5 +1,5 @@
 ﻿using System.Data;
-using Excel;
+using ExcelDataReader;
 using System.IO;
 
 namespace MWTools
@@ -13,10 +13,16 @@ namespace MWTools
             {
                 using (var excelDataReader = ExcelReaderFactory.CreateOpenXmlReader(xlsxFileStream))
                 {
-                    excelDataReader.IsFirstRowAsColumnNames = isUseHeader;
-                    return excelDataReader.AsDataSet();
+                    return excelDataReader.AsDataSet(new ExcelDataSetConfiguration
+                    {
+                        ConfigureDataTable = _ => new ExcelDataTableConfiguration
+                        {
+                            UseHeaderRow = isUseHeader,
+                        },
+                    });
                 }
             }
         }
     }
 }
+

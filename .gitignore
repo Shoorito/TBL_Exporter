@@ -2,3 +2,4 @@
 packages/
 TBL_Exporter/obj/
 TBL_Exporter/bin/
+.github/copilot-instructions.md

@@ -56,6 +56,9 @@
             this.label2 = new System.Windows.Forms.Label();
             this.textboxEncryptPassword = new System.Windows.Forms.TextBox();
             this.label1 = new System.Windows.Forms.Label();
+            this.tgl_only_select_export_type = new System.Windows.Forms.CheckBox();
+            this.progressBarExport = new System.Windows.Forms.ProgressBar();
+            this.labelExportStatus = new System.Windows.Forms.Label();
             this.LoadedFileListGroupBox.SuspendLayout();
             this.IgnoreSheetNamesGroupBox.SuspendLayout();
             this.TableLoadPathGroupBox.SuspendLayout();
@@ -337,12 +340,43 @@
             this.label1.TabIndex = 0;
             this.label1.Text = "Password";
             // 
+            // tgl_only_select_export_type
+            // 
+            this.tgl_only_select_export_type.AutoCheck = false;
+            this.tgl_only_select_export_type.AutoSize = true;
+            this.tgl_only_select_export_type.Location = new System.Drawing.Point(556, 79);
+            this.tgl_only_select_export_type.Name = "tgl_only_select_export_type";
+            this.tgl_only_select_export_type.Size = new System.Drawing.Size(150, 16);
+            this.tgl_only_select_export_type.TabIndex = 20;
+            this.tgl_only_select_export_type.Text = "OnlySelectExportType";
+            this.tgl_only_select_export_type.UseVisualStyleBackColor = true;
+            // 
+            // progressBarExport
+            // 
+            this.progressBarExport.Location = new System.Drawing.Point(3, 453);
+            this.progressBarExport.Name = "progressBarExport";
+            this.progressBarExport.Size = new System.Drawing.Size(535, 18);
+            this.progressBarExport.TabIndex = 21;
+            this.progressBarExport.Visible = false;
+            // 
+            // labelExportStatus
+            // 
+            this.labelExportStatus.AutoSize = true;
+            this.labelExportStatus.Location = new System.Drawing.Point(3, 435);
+            this.labelExportStatus.Name = "labelExportStatus";
+            this.labelExportStatus.Size = new System.Drawing.Size(0, 12);
+            this.labelExportStatus.TabIndex = 22;
+            this.labelExportStatus.Visible = false;
+            // 
             // FormTBLExport
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackgroundImageLayout = System.Windows.Forms.ImageLayout.Stretch;
-            this.ClientSize = new System.Drawing.Size(800, 450);
+            this.ClientSize = new System.Drawing.Size(800, 480);
+            this.Controls.Add(this.labelExportStatus);
+            this.Controls.Add(this.progressBarExport);
+            this.Controls.Add(this.tgl_only_select_export_type);
             this.Controls.Add(this.groupBoxEncryptOption);
             this.Controls.Add(this.groupBoxExportOptions);
             this.Controls.Add(this.groupBox1);
@@ -408,6 +442,9 @@
         private System.Windows.Forms.TextBox textboxEncryptPassword;
         private System.Windows.Forms.Label label3;
         private System.Windows.Forms.GroupBox groupBoxEncryptOption;
+        private System.Windows.Forms.CheckBox tgl_only_select_export_type;
+        private System.Windows.Forms.ProgressBar progressBarExport;
+        private System.Windows.Forms.Label labelExportStatus;
     }
 }
 
