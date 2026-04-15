@@ -52,4 +52,4 @@ TBL_Exporter는 Excel로 작업된 기획 데이터를 프로그램 코드에서
 
 ## 사용 서드파티
 + [SHUtil(자체개발)](https://github.com/Shoorito/SHUtil)
-+ Excel 4.5
++ [ExcelDataReader](https://github.com/ExcelDataReader/ExcelDataReader)
